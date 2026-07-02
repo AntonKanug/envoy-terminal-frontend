@@ -1,5 +1,7 @@
 # envoy-terminal-frontend
 
+<img width="1145" height="707" alt="Screenshot 2026-07-02 at 5 35 10 PM" src="https://github.com/user-attachments/assets/4e8ed80a-a158-4c44-9535-30724952145f" />
+
 A React + Vite + TypeScript frontend (xterm.js) for the **web-terminal**
 [Built-On-Envoy](https://github.com/tetratelabs/built-on-envoy) extension.
 
@@ -30,8 +32,6 @@ npm run dev
 
 Open the printed Vite URL and click **Connect**. Try `vim`, `htop`, `ls --color`,
 and resize the window.
-
-<img width="1145" height="707" alt="Screenshot 2026-07-02 at 5 35 10 PM" src="https://github.com/user-attachments/assets/4e8ed80a-a158-4c44-9535-30724952145f" />
 
 ## Notes
 
