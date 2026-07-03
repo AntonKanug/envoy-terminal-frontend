@@ -25,7 +25,7 @@ export default function App() {
         ) : (
           <button onClick={() => setConnected(true)}>Connect</button>
         )}
-        <span style={{ marginLeft: 'auto', opacity: 0.6 }}>SSE → localhost:10000</span>
+        <span style={{ marginLeft: 'auto', opacity: 0.6 }}>WebSocket → localhost:10000</span>
       </header>
 
       <main style={{ flex: 1, minHeight: 0, background: '#1a1030', padding: 4 }}>
@@ -33,10 +33,10 @@ export default function App() {
           <WebTerminal onClose={() => setConnected(false)} />
         ) : (
           <div style={{ color: '#888', fontFamily: 'system-ui, sans-serif', padding: 16, lineHeight: 1.6 }}>
-            Start the extension in another terminal, then click <b>Connect</b>:
+            Start the web-terminal network filter (Envoy on :10000), then click <b>Connect</b>:
             <pre style={{ color: '#aaa' }}>
-{`./boe run --local extensions/composer/web-terminal \\
-  --config '{"command":"/bin/bash"}'`}
+{`# in built-on-envoy/extensions/web-terminal
+./run-dev.sh`}
             </pre>
           </div>
         )}
