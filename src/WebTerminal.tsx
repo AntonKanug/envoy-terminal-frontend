@@ -4,25 +4,24 @@ import { FitAddon } from '@xterm/addon-fit';
 import '@xterm/xterm/css/xterm.css';
 
 type Props = {
-  /** Base URL for the endpoints. Empty = same-origin (via the Vite proxy). */
+  /** Base URL for the WebSocket. Empty = same-origin (via the Vite proxy). */
   base?: string;
-  /** Called when the stream ends. */
+  /** Called when the socket closes. */
   onClose?: () => void;
 };
 
-function randomSid(): string {
-  return Math.random().toString(36).slice(2) + Date.now().toString(36);
+const encoder = new TextEncoder();
+
+// frame builds a [opcode-byte, ...utf8(payload)] message: '0'=input, '1'=resize.
+function frame(opcode: string, payload: string): Uint8Array {
+  const p = encoder.encode(payload);
+  const m = new Uint8Array(p.length + 1);
+  m[0] = opcode.charCodeAt(0);
+  m.set(p, 1);
+  return m;
 }
 
-function base64ToBytes(b64: string): Uint8Array {
-  const bin = atob(b64);
-  const bytes = new Uint8Array(bin.length);
-  for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
-  return bytes;
-}
-
-// A distinctive theme so this app is visibly different from the plain built-in
-// page — if these colors render, it's xterm.js interpreting escape sequences.
+// Distinctive theme so it's visibly xterm.js rendering escapes.
 const XTERM_THEME = {
   background: '#1a1030',
   foreground: '#e6dcff',
@@ -48,12 +47,9 @@ const XTERM_THEME = {
 };
 
 function writeBanner(term: Terminal): void {
-  const B = '\x1b[1m';
-  const R = '\x1b[0m';
-  const M = '\x1b[35m';
-  const C = '\x1b[96m';
+  const B = '\x1b[1m', R = '\x1b[0m', M = '\x1b[35m', C = '\x1b[96m';
   term.writeln(`${B}${M}┌────────────────────────────────────────────┐${R}`);
-  term.writeln(`${B}${M}│ ${C}React + xterm.js  ·  SSE terminal${M}`.padEnd(56) + `│${R}`);
+  term.writeln(`${B}${M}│ ${C}React + xterm.js  ·  WebSocket terminal${M}`.padEnd(56) + `│${R}`);
   term.writeln(`${B}${M}└────────────────────────────────────────────┘${R}`);
   let bar = '';
   for (let i = 16; i < 52; i++) bar += `\x1b[48;5;${i}m `;
@@ -63,11 +59,9 @@ function writeBanner(term: Terminal): void {
 }
 
 /**
- * WebTerminal renders an xterm.js terminal wired to the web-terminal extension:
- *   - output: an SSE stream (GET /stream) of base64-encoded PTY chunks
- *   - input:  POST /input  (request body = keystrokes)
- *   - resize: POST /resize (cols/rows query params)
- * All requests are correlated by a per-connection session id.
+ * WebTerminal renders an xterm.js terminal over a single WebSocket to the
+ * in-Envoy web-terminal network filter. Client->server frames are opcode-tagged
+ * ('0'=input, '1'=resize JSON); server->client frames are raw PTY output.
  */
 export function WebTerminal({ base = '', onClose }: Props) {
   const containerRef = useRef<HTMLDivElement>(null);
@@ -98,42 +92,36 @@ export function WebTerminal({ base = '', onClose }: Props) {
       onCloseRef.current?.();
     };
 
+    const wsBase = base || `${location.protocol === 'https:' ? 'wss://' : 'ws://'}${location.host}`;
+    const ws = new WebSocket(`${wsBase}/ws`);
+    ws.binaryType = 'arraybuffer';
+    ws.onopen = () => ws.send(frame('1', JSON.stringify({ cols: term.cols, rows: term.rows })));
+    ws.onmessage = (e) => term.write(new Uint8Array(e.data as ArrayBuffer));
+    ws.onclose = () => {
+      term.write('\r\n\x1b[31m[connection closed]\x1b[0m\r\n');
+      finish();
+    };
+    ws.onerror = () => {
+      term.write('\r\n\x1b[31m[connection error]\x1b[0m\r\n');
+      finish();
+    };
+
+    const dataDisp = term.onData((d) => {
+      if (ws.readyState === WebSocket.OPEN) ws.send(frame('0', d));
+    });
+    const resizeDisp = term.onResize(({ cols, rows }) => {
+      if (ws.readyState === WebSocket.OPEN) ws.send(frame('1', JSON.stringify({ cols, rows })));
+    });
+
     const ro = new ResizeObserver(() => fit.fit());
     ro.observe(el);
     term.focus();
-
-    const sid = randomSid();
-    const qs = (extra?: Record<string, string | number>): string => {
-      const p = new URLSearchParams({ sid });
-      for (const k in extra) p.set(k, String(extra[k]));
-      return p.toString();
-    };
-
-    const es = new EventSource(`${base}/stream?${qs({ cols: term.cols, rows: term.rows })}`);
-    es.onmessage = (e) => {
-      if (e.data) term.write(base64ToBytes(e.data));
-    };
-    es.addEventListener('exit', () => {
-      term.write('\r\n\x1b[33m[process exited]\x1b[0m\r\n');
-      es.close();
-      finish();
-    });
-    es.onerror = () => {
-      term.write('\r\n\x1b[31m[connection closed]\x1b[0m\r\n');
-      es.close();
-      finish();
-    };
-
-    const dataDisp = term.onData((d) => void fetch(`${base}/input?${qs()}`, { method: 'POST', body: d }));
-    const resizeDisp = term.onResize(
-      ({ cols, rows }) => void fetch(`${base}/resize?${qs({ cols, rows })}`, { method: 'POST' }),
-    );
 
     return () => {
       ro.disconnect();
       dataDisp.dispose();
       resizeDisp.dispose();
-      es.close();
+      ws.close();
       term.dispose();
     };
   }, [base]);

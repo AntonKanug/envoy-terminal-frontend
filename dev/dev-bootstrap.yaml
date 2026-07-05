@@ -1,0 +1,26 @@
+# Dev bootstrap: a bare L4 listener whose network filter chain is the web-terminal
+# dynamic module followed by envoy.echo. The module returns Stop and owns the
+# connection, so echo (the required terminal filter) never actually runs.
+admin:
+  address:
+    socket_address: { address: 127.0.0.1, port_value: 9902 }
+static_resources:
+  listeners:
+    - name: main
+      # localhost-only: the terminal is unauthenticated RCE by design.
+      address:
+        socket_address: { address: 127.0.0.1, port_value: 10000 }
+      filter_chains:
+        - filters:
+            - name: envoy.filters.network.dynamic_modules
+              typed_config:
+                "@type": type.googleapis.com/envoy.extensions.filters.network.dynamic_modules.v3.DynamicModuleNetworkFilter
+                dynamic_module_config:
+                  name: web-terminal
+                filter_name: web-terminal
+                filter_config:
+                  "@type": type.googleapis.com/google.protobuf.StringValue
+                  value: '{"command":"/bin/bash"}'
+            - name: envoy.filters.network.echo
+              typed_config:
+                "@type": type.googleapis.com/envoy.extensions.filters.network.echo.v3.Echo

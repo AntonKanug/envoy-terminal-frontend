@@ -1,0 +1,64 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>web-terminal (no deps)</title>
+  <style>
+    html, body { margin: 0; height: 100%; background: #111; color: #ddd;
+                 font: 14px/1.35 ui-monospace, monospace; }
+    #out { white-space: pre-wrap; word-break: break-all; padding: 10px;
+           height: 100%; box-sizing: border-box; overflow: auto; outline: none; }
+  </style>
+</head>
+<body>
+  <!-- tabindex so the <pre> can hold focus and receive keystrokes -->
+  <pre id="out" tabindex="0"></pre>
+  <script>
+    // Dependency-free client for the web-terminal WS filter: raw byte I/O, no
+    // xterm.js. Line-oriented commands (echo, ls) read fine; full-screen TUIs
+    // (vim, htop) look messy because ANSI control codes are lightly stripped for
+    // readability here, not interpreted (that's exactly what xterm.js is for).
+    const out = document.getElementById('out');
+    out.focus();
+
+    // Same host as the page, Envoy's terminal listener on :10000. Use wss + https
+    // page if the listener terminates TLS.
+    const ws = new WebSocket(`ws://${location.hostname || 'localhost'}:10000/ws`);
+    ws.binaryType = 'arraybuffer';
+
+    // Wire frame: opcode byte + payload. '0' = keystrokes, '1' = resize JSON.
+    const frame = (op, s) => {
+      const b = new TextEncoder().encode(s);
+      const f = new Uint8Array(b.length + 1);
+      f[0] = op.charCodeAt(0); f.set(b, 1);
+      return f;
+    };
+
+    ws.onopen  = () => { ws.send(frame('1', JSON.stringify({ cols: 80, rows: 24 })));
+                         out.textContent = '[connected]\n'; };
+    ws.onclose = () => { out.textContent += '\n[disconnected]\n'; };
+    ws.onerror = () => { out.textContent += '\n[error]\n'; };
+    ws.onmessage = (e) => {
+      const s = new TextDecoder().decode(new Uint8Array(e.data))
+        .replace(/\x1b\[[0-9;?]*[A-Za-z]/g, ''); // drop CSI escapes for a plain view
+      out.textContent += s;
+      out.scrollTop = out.scrollHeight;
+    };
+
+    // Translate key events to the bytes a terminal would send.
+    out.addEventListener('keydown', (ev) => {
+      if (ws.readyState !== WebSocket.OPEN) return;
+      let data;
+      if (ev.key === 'Enter') data = '\r';
+      else if (ev.key === 'Backspace') data = '\x7f';
+      else if (ev.key === 'Tab') data = '\t';
+      else if (ev.ctrlKey && ev.key.length === 1)              // Ctrl-C, Ctrl-D, ...
+        data = String.fromCharCode(ev.key.toUpperCase().charCodeAt(0) - 64);
+      else if (ev.key.length === 1) data = ev.key;             // printable
+      else return;                                             // ignore arrows/F-keys
+      ev.preventDefault();
+      ws.send(frame('0', data));
+    });
+  </script>
+</body>
+</html>
